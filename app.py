@@ -1,58 +1,226 @@
-import time
+import streamlit as st
+from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
 import cv2
+import mediapipe as mp
+import numpy as np
+import asyncio
+import edge_tts
+import os
+import queue
+import time
 
-class RealTimeSignTransformer(VideoTransformerBase):
+# ================== CUSTOM BRANDING & VIOLET STYLING ==================
+st.set_page_config(
+    page_title="GlobalInternet.py — SignBridge AI",
+    page_icon="🌐",
+    layout="wide"
+)
+
+st.markdown("""
+    <style>
+    .stApp { background-color: #0b071a; color: #e2d9f3; }
+    [data-testid="stSidebar"] { background-color: #130c26 !important; border-right: 2px solid #3a1f5d; }
+    .main-header {
+        font-size: 2.5rem !important;
+        font-weight: 800;
+        background: linear-gradient(45deg, #dfa2ff, #8a2be2);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        margin-bottom: 0.2rem;
+    }
+    .sidebar-brand { font-size: 1.4rem; font-weight: bold; color: #bf80ff; border-bottom: 2px solid #3a1f5d; padding-bottom: 10px; margin-bottom: 15px; }
+    .sidebar-info { font-size: 0.95rem; color: #aaa2bc; line-height: 1.6; }
+    div[data-baseweb="input"] { background-color: #1a1235 !important; border-color: #5c3593 !important; }
+    input { color: #ffffff !important; }
+    .stButton>button { background-color: #5c3593 !important; color: white !important; border: 1px solid #8a2be2 !important; }
+    .stButton>button:hover { background-color: #7944c3 !important; border-color: #bf80ff !important; box-shadow: 0px 0px 10px #8a2be2; }
+    .chat-box { background-color: #160f2e; border: 1px solid #3a1f5d; padding: 15px; border-radius: 8px; max-height: 300px; overflow-y: auto; }
+    </style>
+""", unsafe_allow_html=True)
+
+# Shared Thread-Safe Queue to bridge Camera Thread with UI Thread
+if "sign_queue" not in st.session_state:
+    st.session_state.sign_queue = queue.Queue()
+if "live_chat_log" not in st.session_state:
+    st.session_state.live_chat_log = []
+
+# ================== SIDEBAR CONFIGURATION LOGIC ==================
+with st.sidebar:
+    st.markdown('<div class="sidebar-brand">🌐 GlobalInternet.py</div>', unsafe_allow_html=True)
+    language = st.selectbox("🌐 Target Translation Array / Langue:", ["English", "Français", "Português"])
+    st.markdown("<hr style='border-color: #3a1f5d;'>", unsafe_allow_html=True)
+    st.markdown("<h3 style='color: #bf80ff;'>🛠 ... Core Infrastructure Desk</h3>", unsafe_allow_html=True)
+    st.markdown(f"""
+    <div class="sidebar-info">
+        <strong>Coder-in-Chief:</strong><br><span style="color: #fff; font-weight:600;">Gesner Deslandes</span><br><br>
+        <strong>Engineering Support Line:</strong><br><span style="color: #bf80ff;">(509)-47385663</span><br><br>
+        <strong>Status:</strong> <span style="color: #aa66ff;">● Live WebRTC v0.72 Engine</span>
+    </div>
+    """, unsafe_allow_html=True)
+
+# ================== LOCALIZATION DICTIONARY ==================
+strings = {
+    "English": {
+        "title": "SignBridge AI Real-Time Stream",
+        "sub": "Live Sign Language Translation Telemetry Desk",
+        "step1": "🎥 Live Video Stream Pipeline",
+        "step2": "💬 Real-Time Live Transcript (Updates automatically)",
+        "clear": "Clear Live Transcript Logs",
+        "hello": "HELLO", "thank_you": "THANK YOU"
+    },
+    "Français": {
+        "title": "Flux en Temps Réel SignBridge AI",
+        "sub": "Bureau de télémétrie de traduction de la langue des signes en direct",
+        "step1": "🎥 Pipeline de flux vidéo en direct",
+        "step2": "💬 Transcription en direct (Mise à jour automatique)",
+        "clear": "Effacer les journaux de transcription",
+        "hello": "BONJOUR", "thank_you": "MERCI"
+    },
+    "Português": {
+        "title": "Fluxo em Tempo Real SignBridge AI",
+        "sub": "Balcão de telemetria de tradução de língua de sinais ao vivo",
+        "step1": "🎥 Pipeline de transmissão de vídeo ao vivo",
+        "step2": "💬 Transcrição em tempo real (Atualização automática)",
+        "clear": "Limpar registros de transcrição",
+        "hello": "OLÁ", "thank_you": "OBRIGADO"
+    }
+}
+current_lang = strings[language]
+
+st.markdown(f'<div class="main-header">{current_lang["title"]}</div>', unsafe_allow_html=True)
+st.write(f"<i style='color:#aaa2bc;'>{current_lang['sub']}</i>", unsafe_allow_html=True)
+
+# ================== MODERN MEDIAPIPE INITIALIZATION ==================
+BaseOptions = mp.tasks.BaseOptions
+HandLandmarker = mp.tasks.vision.HandLandmarker
+HandLandmarkerOptions = mp.tasks.vision.HandLandmarkerOptions
+VisionRunningMode = mp.tasks.vision.RunningMode
+
+# --- COMPUTER VISION CORE PROCESSING ENGINE ---
+# Using the updated VideoProcessorBase class architecture
+class RealTimeSignTransformer(VideoProcessorBase):
     def __init__(self, result_queue):
         self.result_queue = result_queue
-        # ... [Your MediaPipe initialization code remains here] ...
-        
-        # Telemetry State Trackers
+        options = HandLandmarkerOptions(
+            base_options=BaseOptions(model_asset_buffer=None),
+            running_mode=VisionRunningMode.IMAGE,
+            num_hands=1,
+            min_hand_detection_confidence=0.7
+        )
+        self.landmarker = HandLandmarker.create_from_options(options)
+        self.last_emitted_sign = None
+        self.frame_counter = 0
         self.prev_frame_time = 0
-        self.new_frame_time = 0
 
-    def transform(self, frame):
-        # 1. Spatial Telemetry (Frame Width, Height, and Channels)
+    # Modern WebRTC implementations use recv() instead of transform()
+    def recv(self, frame):
         img = frame.to_ndarray(format="bgr24")
-        height, width, channels = img.shape
+        height, width, _ = img.shape
+        self.frame_counter += 1
         
-        # 2. Performance Telemetry (Calculating Actual Processing FPS)
-        self.new_frame_time = time.time()
-        fps = 1 / (self.new_frame_time - self.prev_frame_time)
-        self.prev_frame_time = self.new_frame_time
+        # Calculate real-time FPS telemetry
+        new_frame_time = time.time()
+        fps = 1 / (new_frame_time - self.prev_frame_time) if self.prev_frame_time != 0 else 30
+        self.prev_frame_time = new_frame_time
         
-        # Mirror image for natural movement
         img = cv2.flip(img, 1) 
-        
-        # Run your MediaPipe Tracking Matrix
         rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_img)
         detection_result = self.landmarker.detect(mp_image)
         
-        # 3. Positional Telemetry (Hand Coordinate Tracing)
-        telemetry_log = "No Hands Tracked"
+        detected_sign = ""
+        telemetry_log = "Telemetry: Looking for Hand Matrix..."
         
         if detection_result.hand_landmarks:
             for hand_landmarks in detection_result.hand_landmarks:
-                # Extract specific point telemetry (e.g., Wrist location)
                 wrist = hand_landmarks[0]
-                
-                # Convert normalized tracking decimals to actual pixel coordinates
                 pixel_x = int(wrist.x * width)
                 pixel_y = int(wrist.y * height)
+                telemetry_log = f"Wrist Tracking Vector: X={pixel_x}, Y={pixel_y}"
                 
-                telemetry_log = f"Wrist Vector: X={pixel_x}, Y={pixel_y}"
-                
-                # Draw telemetry landmarks on frame
                 for landmark in hand_landmarks:
                     x = int(landmark.x * width)
                     y = int(landmark.y * height)
-                    cv2.circle(img, (x, y), 4, (230, 30, 150), -1)
+                    cv2.circle(img, (x, y), 5, (230, 30, 150), -1) 
 
-        # --- RENDER TELEMETRY OVERLAY ON CAMERA SCREEN ---
-        # Draw live stats directly onto the top corner of the camera feed
-        cv2.putText(img, f"FPS: {int(fps)} | Res: {width}x{height}", (20, 30), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-        cv2.putText(img, telemetry_log, (20, 60), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                thumb_tip = hand_landmarks[4].y
+                index_tip = hand_landmarks[8].y
+                
+                if index_tip < thumb_tip:
+                    detected_sign = current_lang["hello"]
+                else:
+                    detected_sign = current_lang["thank_you"]
 
-        return img
+            cv2.putText(img, f"Sign: {detected_sign}", (20, 50), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 120, 210), 2)
+            
+            if detected_sign != self.last_emitted_sign and self.frame_counter % 12 == 0:
+                self.result_queue.put(detected_sign)
+                self.last_emitted_sign = detected_sign
+        else:
+            self.last_emitted_sign = None
+
+        # Print Telemetry overlays directly onto the video feed
+        cv2.putText(img, f"FPS: {int(fps)} | Matrix Dim: {width}x{height}", (20, height - 40), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+        cv2.putText(img, telemetry_log, (20, height - 15), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1)
+
+        # Re-encapsulate using the modern web-frame generation layer
+        import av
+        return av.VideoFrame.from_ndarray(img, format="bgr24")
+
+# --- CAMERA REGISTRATION UI LAYOUT ---
+col_video, col_chat = st.columns([1, 1])
+
+with col_video:
+    st.write(f"<h3 style='color: #bf80ff;'>{current_lang['step1']}</h3>", unsafe_allow_html=True)
+    webrtc_streamer(
+        key="realtime-bridge-v4", 
+        # Updated key pointer attribute name: 'video_processor_factory'
+        video_processor_factory=lambda: RealTimeSignTransformer(st.session_state.sign_queue),
+        rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
+        media_stream_constraints={"video": True, "audio": False}
+    )
+
+# --- REAL-TIME LIVE TRANSCRIPT DESK ---
+with col_chat:
+    st.write(f"<h3 style='color: #bf80ff;'>{current_lang['step2']}</h3>", unsafe_allow_html=True)
+    
+    while not st.session_state.sign_queue.empty():
+        try:
+            new_sign = st.session_state.sign_queue.get_nowait()
+            st.session_state.live_chat_log.append(new_sign)
+        except queue.Empty:
+            break
+
+    chat_html = "<div class='chat-box'>"
+    if st.session_state.live_chat_log:
+        for idx, word in enumerate(st.session_state.live_chat_log):
+            chat_html += f"<p style='margin:4px 0; font-family:monospace;'><span style='color:#bf80ff;'>[Sign {idx+1}]:</span> <strong style='color:#fff; font-size:1.1rem;'>{word}</strong></p>"
+    else:
+        chat_html += "<p style='color:#6a5f80; font-style:italic;'>Waiting for camera translation telemetry input stream...</p>"
+    chat_html += "</div>"
+    
+    st.markdown(chat_html, unsafe_allow_html=True)
+    
+    st.write("##")
+    if st.button(current_lang["clear"], use_container_width=True):
+        st.session_state.live_chat_log = []
+        st.rerun()
+
+# --- AUTOMATIC UI REFRESH ELEMENT ---
+if len(st.session_state.live_chat_log) > 0:
+    st.write("") 
+
+# ================== CORPORATE FOOTER LAYER ==================
+st.markdown("<hr style='border-color: #3a1f5d;'>", unsafe_allow_html=True)
+st.markdown(
+    """
+    <div style="text-align: center; font-size: 0.85rem; color:#aaa2bc; letter-spacing: 0.5px;">
+        🚀 <strong>SIGNBRIDGE REAL-TIME ENGINE</strong> | Developed and Maintained by <strong>GlobalInternet.py</strong><br>
+        Architect-in-Chief: <strong>Gesner Deslandes</strong> | Infrastructure Desk Contact: <strong style="color:#bf80ff;">(509)-47385663</strong>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
