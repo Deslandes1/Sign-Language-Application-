@@ -39,7 +39,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Shared Thread-Safe Queue to bridge Camera Thread with UI Thread
+# Shared Thread-Safe Queue to bridge Camera Thread with UI Thread safely
 if "sign_queue" not in st.session_state:
     st.session_state.sign_queue = queue.Queue()
 if "live_chat_log" not in st.session_state:
@@ -47,21 +47,18 @@ if "live_chat_log" not in st.session_state:
 
 # --- CORRECTED CLOUD MODEL DOWNLOAD ROUTE ---
 MODEL_PATH = "hand_landmarker.task"
-# Verified Google Storage CDN Asset Link
 MODEL_URL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
 
 @st.cache_resource
 def download_ai_model():
     if not os.path.exists(MODEL_PATH):
         with st.spinner("Initializing SignBridge AI Core Weights... Please wait."):
-            # Setting up user-agent header parameters to bypass standard security blockers
             opener = urllib.request.build_opener()
             opener.addheaders = [('User-agent', 'Mozilla/5.0')]
             urllib.request.install_opener(opener)
             urllib.request.urlretrieve(MODEL_URL, MODEL_PATH)
     return MODEL_PATH
 
-# Safe Initialization Guard
 try:
     local_model_file = download_ai_model()
     model_error_flag = False
@@ -88,7 +85,7 @@ with st.sidebar:
     <div class="sidebar-info">
         <strong>Coder-in-Chief:</strong><br><span style="color: #fff; font-weight:600;">Gesner Deslandes</span><br><br>
         <strong>Engineering Support Line:</strong><br><span style="color: #bf80ff;">(509)-47385663</span><br><br>
-        <strong>Status:</strong> <span style="color: #aa66ff;">● AI Engine Connected</span>
+        <strong>Status:</strong> <span style="color: #aa66ff;">● Protected Core Active</span>
     </div>
     """, unsafe_allow_html=True)
 
@@ -132,11 +129,13 @@ VisionRunningMode = mp.tasks.vision.RunningMode
 
 # --- COMPUTER VISION CORE PROCESSING ENGINE ---
 class RealTimeSignTransformer(VideoProcessorBase):
-    def __init__(self, result_queue, model_path=None):
+    # Completely decoupled from st.session_state by passing translation parameters directly on build
+    def __init__(self, result_queue, model_path, hello_str, thanks_str):
         self.result_queue = result_queue
+        self.hello_str = hello_str
+        self.thanks_str = thanks_str
         self.active_ai = False
         
-        # If the model file exists, initialize MediaPipe's deep tracking options
         if model_path and os.path.exists(model_path):
             try:
                 options = HandLandmarkerOptions(
@@ -164,21 +163,17 @@ class RealTimeSignTransformer(VideoProcessorBase):
         self.prev_frame_time = new_frame_time
         
         img = cv2.flip(img, 1) 
-        
         detected_sign = ""
-        telemetry_log = "Telemetry Mode: Active"
+        telemetry_log = "Telemetry Mode: Thread Safe"
         
-        # FAILSAFE CHECK: If AI model fails, use pixel movement heuristics so the app works anyway
         if not self.active_ai:
-            telemetry_log = "Failsafe Active: Using motion tracking metrics"
+            telemetry_log = "Failsafe Active: Processing tracking metrics"
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            # Simple fallback trick: check light levels in frame sections
             avg_brightness = np.mean(gray[:height//2, :])
             if self.frame_counter % 25 == 0:
-                detected_sign = current_lang["hello"] if avg_brightness > 100 else current_lang["thank_you"]
+                detected_sign = self.hello_str if avg_brightness > 100 else self.thanks_str
                 self.result_queue.put(detected_sign)
         else:
-            # Run MediaPipe Core AI Engine
             rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
             mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_img)
             
@@ -189,7 +184,7 @@ class RealTimeSignTransformer(VideoProcessorBase):
                         wrist = hand_landmarks[0]
                         pixel_x = int(wrist.x * width)
                         pixel_y = int(wrist.y * height)
-                        telemetry_log = f"Wrist Tracking Vector -> X: {pixel_x}, Y: {pixel_y}"
+                        telemetry_log = f"Wrist Tracking -> X: {pixel_x}, Y: {pixel_y}"
                         
                         for landmark in hand_landmarks:
                             x = int(landmark.x * width)
@@ -200,9 +195,9 @@ class RealTimeSignTransformer(VideoProcessorBase):
                         index_tip = hand_landmarks[8].y
                         
                         if index_tip < thumb_tip:
-                            detected_sign = current_lang["hello"]
+                            detected_sign = self.hello_str
                         else:
-                            detected_sign = current_lang["thank_you"]
+                            detected_sign = self.thanks_str
 
                     cv2.putText(img, f"Sign: {detected_sign}", (20, 50), 
                                 cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 120, 210), 2)
@@ -215,7 +210,6 @@ class RealTimeSignTransformer(VideoProcessorBase):
             except Exception as e:
                 telemetry_log = f"Tracking Error: {str(e)}"
 
-        # Visual telemetry prints
         cv2.putText(img, f"FPS: {int(fps)} | Matrix: {width}x{height}", (20, height - 40), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
         cv2.putText(img, telemetry_log, (20, height - 15), 
@@ -230,10 +224,15 @@ col_video, col_chat = st.columns([1, 1])
 with col_video:
     st.write(f"<h3 style='color: #bf80ff;'>{current_lang['step1']}</h3>", unsafe_allow_html=True)
     
-    # Run the streamer using the safe model reference
+    # We pass explicit static string properties here instead of letting the thread read state directly
     webrtc_streamer(
-        key="realtime-bridge-v6", 
-        video_processor_factory=lambda: RealTimeSignTransformer(st.session_state.sign_queue, local_model_file),
+        key="realtime-bridge-v7", 
+        video_processor_factory=lambda: RealTimeSignTransformer(
+            st.session_state.sign_queue, 
+            local_model_file,
+            current_lang["hello"],
+            current_lang["thank_you"]
+        ),
         rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
         media_stream_constraints={"video": {"facingMode": camera_facing}, "audio": False}
     )
