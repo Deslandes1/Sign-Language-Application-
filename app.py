@@ -6,6 +6,7 @@ import numpy as np
 import asyncio
 import edge_tts
 import os
+import queue
 
 # ================== CUSTOM BRANDING & VIOLET STYLING ==================
 st.set_page_config(
@@ -14,135 +15,77 @@ st.set_page_config(
     layout="wide"
 )
 
-# Custom CSS injection for full-scale deep purple and violet aesthetic
 st.markdown("""
     <style>
-    /* Main Background & Text Color Tweaks */
-    .stApp {
-        background-color: #0b071a;
-        color: #e2d9f3;
-    }
-    
-    /* Entire Sidebar Container Custom Styling */
-    [data-testid="stSidebar"] {
-        background-color: #130c26 !important;
-        border-right: 2px solid #3a1f5d;
-    }
-    
-    /* Dynamic Neon Purple Header */
+    .stApp { background-color: #0b071a; color: #e2d9f3; }
+    [data-testid="stSidebar"] { background-color: #130c26 !important; border-right: 2px solid #3a1f5d; }
     .main-header {
         font-size: 2.5rem !important;
         font-weight: 800;
-        background: linear-gradient(45deg, #b8860b, #9400d3, #da70d6);
         background: linear-gradient(45deg, #dfa2ff, #8a2be2);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         margin-bottom: 0.2rem;
     }
-    
-    /* Accent Sidebar Styles */
-    .sidebar-brand {
-        font-size: 1.4rem;
-        font-weight: bold;
-        color: #bf80ff;
-        border-bottom: 2px solid #3a1f5d;
-        padding-bottom: 10px;
-        margin-bottom: 15px;
-    }
-    .sidebar-info {
-        font-size: 0.95rem;
-        color: #aaa2bc;
-        line-height: 1.6;
-    }
-    
-    /* Style form boxes and text fields to fit the palette */
-    div[data-baseweb="input"] {
-        background-color: #1a1235 !important;
-        border-color: #5c3593 !important;
-    }
-    input {
-        color: #ffffff !important;
-    }
-    
-    /* Customization for Streamlit Buttons */
-    .stButton>button {
-        background-color: #5c3593 !important;
-        color: white !important;
-        border: 1px solid #8a2be2 !important;
-        transition: all 0.3s ease;
-    }
-    .stButton>button:hover {
-        background-color: #7944c3 !important;
-        border-color: #bf80ff !important;
-        box-shadow: 0px 0px 10px #8a2be2;
-    }
+    .sidebar-brand { font-size: 1.4rem; font-weight: bold; color: #bf80ff; border-bottom: 2px solid #3a1f5d; padding-bottom: 10px; margin-bottom: 15px; }
+    .sidebar-info { font-size: 0.95rem; color: #aaa2bc; line-height: 1.6; }
+    div[data-baseweb="input"] { background-color: #1a1235 !important; border-color: #5c3593 !important; }
+    input { color: #ffffff !important; }
+    .stButton>button { background-color: #5c3593 !important; color: white !important; border: 1px solid #8a2be2 !important; }
+    .stButton>button:hover { background-color: #7944c3 !important; border-color: #bf80ff !important; box-shadow: 0px 0px 10px #8a2be2; }
+    .chat-box { background-color: #160f2e; border: 1px solid #3a1f5d; padding: 15px; border-radius: 8px; max-height: 300px; overflow-y: auto; }
     </style>
 """, unsafe_allow_html=True)
+
+# Shared Thread-Safe Queue to bridge Camera Thread with UI Thread
+if "sign_queue" not in st.session_state:
+    st.session_state.sign_queue = queue.Queue()
+if "live_chat_log" not in st.session_state:
+    st.session_state.live_chat_log = []
 
 # ================== SIDEBAR CONFIGURATION LOGIC ==================
 with st.sidebar:
     st.markdown('<div class="sidebar-brand">🌐 GlobalInternet.py</div>', unsafe_allow_html=True)
-    
-    # Language Selection Matrix Array
-    language = st.selectbox(
-        "🌐 Target Translation Array / Langue:",
-        ["English", "Français", "Português"]
-    )
-    
+    language = st.selectbox("🌐 Target Translation Array / Langue:", ["English", "Français", "Português"])
     st.markdown("<hr style='border-color: #3a1f5d;'>", unsafe_allow_html=True)
     st.markdown("<h3 style='color: #bf80ff;'>🛠️ Core Infrastructure Desk</h3>", unsafe_allow_html=True)
-    
-    # User's Verified Corporate Information 
     st.markdown(f"""
     <div class="sidebar-info">
-        <strong>Coder-in-Chief:</strong><br>
-        <span style="color: #fff; font-weight:600;">Gesner Deslandes</span><br><br>
-        <strong>Engineering Support Line:</strong><br>
-        <span style="color: #bf80ff;">(509)-47385663</span><br><br>
-        <strong>Status:</strong> <span style="color: #aa66ff;">● Production Live</span>
+        <strong>Coder-in-Chief:</strong><br><span style="color: #fff; font-weight:600;">Gesner Deslandes</span><br><br>
+        <strong>Engineering Support Line:</strong><br><span style="color: #bf80ff;">(509)-47385663</span><br><br>
+        <strong>Status:</strong> <span style="color: #aa66ff;">● Real-time Stream Engine Live</span>
     </div>
     """, unsafe_allow_html=True)
 
 # ================== LOCALIZATION DICTIONARY ==================
 strings = {
     "English": {
-        "title": "SignBridge AI Chatbot Platform",
-        "sub": "Real-Time Sign Language Translation & Audio Sync Engine",
-        "step1": "🎥 Step 1: Initialize Local Camera Stream Gateway",
-        "step2": "💬 Step 2: Live Digital Translation Desk",
-        "vector": "Translated Text Input Vector:",
-        "btn": "Send to Chatbot Matrix",
-        "bot_prefix": "System processed sign:",
-        "bot_suffix": "How can I assist you further?",
-        "voice": "en-US-ChristopherNeural"
+        "title": "SignBridge AI Real-Time Stream",
+        "sub": "Live Sign Language Translation Telemetry Desk",
+        "step1": "🎥 Live Video Stream Pipeline",
+        "step2": "💬 Real-Time Live Transcript (Updates automatically)",
+        "clear": "Clear Live Transcript Logs",
+        "hello": "HELLO", "thank_you": "THANK YOU"
     },
     "Français": {
-        "title": "Plateforme Chatbot SignBridge AI",
-        "sub": "Moteur de Traduction en Temps Réel et Synchronisation Audio",
-        "step1": "🎥 Étape 1 : Initialiser la passerelle de flux caméra",
-        "step2": "💬 Étape 2 : Bureau de traduction en direct",
-        "vector": "Vecteur d'entrée de texte traduit :",
-        "btn": "Envoyer au Chatbot Matrix",
-        "bot_prefix": "Le système a traité le signe :",
-        "bot_suffix": "Comment puis-je vous aider davantage ?",
-        "voice": "fr-FR-HenriNeural"
+        "title": "Flux en Temps Réel SignBridge AI",
+        "sub": "Bureau de télémétrie de traduction de la langue des signes en direct",
+        "step1": "🎥 Pipeline de flux vidéo en direct",
+        "step2": "💬 Transcription en direct (Mise à jour automatique)",
+        "clear": "Effacer les journaux de transcription",
+        "hello": "BONJOUR", "thank_you": "MERCI"
     },
     "Português": {
-        "title": "Plataforma Chatbot SignBridge AI",
-        "sub": "Motor de Tradução em Tempo Real e Sincronização de Áudio",
-        "step1": "🎥 Passo 1: Inicializar o Gateway de Transmissão da Câmera",
-        "step2": "💬 Passo 2: Balcão de Tradução ao Vivo",
-        "vector": "Vetor de Entrada de Texto Traduzido:",
-        "btn": "Enviar para o Chatbot Matrix",
-        "bot_prefix": "O sistema processou o sinal:",
-        "bot_suffix": "Como posso ajudar você mais?",
-        "voice": "pt-BR-AntonioNeural"
+        "title": "Fluxo em Tempo Real SignBridge AI",
+        "sub": "Balcão de telemetria de tradução de língua de sinais ao vivo",
+        "step1": "🎥 Pipeline de transmissão de vídeo ao vivo",
+        "step2": "💬 Transcrição em tempo real (Atualização automática)",
+        "clear": "Limpar registros de transcrição",
+        "hello": "OLÁ", "thank_you": "OBRIGADO"
     }
 }
-
 current_lang = strings[language]
 
-# Main Area Header Elements
 st.markdown(f'<div class="main-header">{current_lang["title"]}</div>', unsafe_allow_html=True)
 st.write(f"<i style='color:#aaa2bc;'>{current_lang['sub']}</i>", unsafe_allow_html=True)
 
@@ -152,108 +95,109 @@ HandLandmarker = mp.tasks.vision.HandLandmarker
 HandLandmarkerOptions = mp.tasks.vision.HandLandmarkerOptions
 VisionRunningMode = mp.tasks.vision.RunningMode
 
-# Initialize persistent session states
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
-if "detected_text" not in st.session_state:
-    st.session_state.detected_text = ""
-
-# --- AUDIO GENERATION FUNCTION ---
-def generate_audio(text, voice_model):
-    output_file = "response.mp3"
-    communicate = edge_tts.Communicate(text, voice_model)
-    asyncio.run(communicate.save(output_file))
-    return output_file
-
 # --- COMPUTER VISION VIDEO LAYER ---
-class SignLanguageTransformer(VideoTransformerBase):
-    def __init__(self):
+class RealTimeSignTransformer(VideoTransformerBase):
+    def __init__(self, result_queue):
+        self.result_queue = result_queue
         options = HandLandmarkerOptions(
             base_options=BaseOptions(model_asset_buffer=None),
             running_mode=VisionRunningMode.IMAGE,
-            num_hands=2,
+            num_hands=1,
             min_hand_detection_confidence=0.7
         )
         self.landmarker = HandLandmarker.create_from_options(options)
+        self.last_emitted_sign = None
+        self.frame_counter = 0
 
     def transform(self, frame):
         img = frame.to_ndarray(format="bgr24")
         img = cv2.flip(img, 1) 
+        self.frame_counter += 1
         
         rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_img)
-        
         detection_result = self.landmarker.detect(mp_image)
         
         detected_sign = ""
         if detection_result.hand_landmarks:
             for hand_landmarks in detection_result.hand_landmarks:
-                # Custom Purple Node tracing matrix loops (BGR format: Purple is Blue + Red)
                 for landmark in hand_landmarks:
                     x = int(landmark.x * img.shape[1])
                     y = int(landmark.y * img.shape[0])
-                    cv2.circle(img, (x, y), 5, (230, 30, 150), -1) # Glowing Purple/Magenta Nodes
+                    cv2.circle(img, (x, y), 5, (230, 30, 150), -1) 
 
-                # Boundary Heuristics 
                 thumb_tip = hand_landmarks[4].y
                 index_tip = hand_landmarks[8].y
+                
                 if index_tip < thumb_tip:
-                    detected_sign = "HELLO" if language == "English" else ("BONJOUR" if language == "Français" else "OLÁ")
+                    detected_sign = current_lang["hello"]
                 else:
-                    detected_sign = "THANK YOU" if language == "English" else ("MERCI" if language == "Français" else "OBRIGADO")
+                    detected_sign = current_lang["thank_you"]
 
-            # Draw matching text banner onto the video stream
-            cv2.putText(img, f"Sign: {detected_sign}", (20, 50), 
+            cv2.putText(img, f"Streaming: {detected_sign}", (20, 50), 
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 120, 210), 2)
             
-            st.session_state.detected_text = detected_sign
+            # Anti-flood logic: Only push to UI chat if the sign has changed and remains stable
+            if detected_sign != self.last_emitted_sign and self.frame_counter % 10 == 0:
+                self.result_queue.put(detected_sign)
+                self.last_emitted_sign = detected_sign
+        else:
+            self.last_emitted_sign = None
 
         return img
 
-# --- CAMERA INPUT LAYER ---
-st.write(f"<h3 style='color: #bf80ff;'>{current_lang['step1']}</h3>", unsafe_allow_html=True)
-webrtc_streamer(
-    key="sign-streamer-v3", 
-    video_transformer_factory=SignLanguageTransformer,
-    rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
-    media_stream_constraints={"video": True, "audio": False}
-)
+# --- CAMERA REGISTRATION UI LAYOUT ---
+col_video, col_chat = st.columns([1, 1])
 
-# --- CHATBOT INTERACTIVE INTERFACE ---
-st.write(f"<h3 style='color: #bf80ff;'>{current_lang['step2']}</h3>", unsafe_allow_html=True)
+with col_video:
+    st.write(f"<h3 style='color: #bf80ff;'>{current_lang['step1']}</h3>", unsafe_allow_html=True)
+    webrtc_streamer(
+        key="realtime-bridge", 
+        video_transformer_factory=lambda: RealTimeSignTransformer(st.session_state.sign_queue),
+        rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
+        media_stream_constraints={"video": True, "audio": False}
+    )
 
-col1, col2 = st.columns([3, 1])
-with col1:
-    user_input = st.text_input(current_lang["vector"], value=st.session_state.detected_text)
-
-with col2:
-    st.write("##")
-    send_btn = st.button(current_lang["btn"], use_container_width=True)
-
-if send_btn and user_input:
-    st.session_state.chat_history.append({"role": "user", "text": user_input})
+# --- REAL-TIME LIVE TRANSCRIPT DESK ---
+with col_chat:
+    st.write(f"<h3 style='color: #bf80ff;'>{current_lang['step2']}</h3>", unsafe_allow_html=True)
     
-    bot_reply = f"{current_lang['bot_prefix']} '{user_input}'. {current_lang['bot_suffix']}"
-    st.session_state.chat_history.append({"role": "bot", "text": bot_reply})
-    
-    audio_path = generate_audio(bot_reply, current_lang["voice"])
-    st.session_state.latest_audio = audio_path
+    # Check the bridge queue for new incoming frames from the camera
+    while not st.session_state.sign_queue.empty():
+        try:
+            new_sign = st.session_state.sign_queue.get_nowait()
+            st.session_state.live_chat_log.append(new_sign)
+        except queue.Empty:
+            break
 
-# --- DISPLAY STREAMLINED TRANSLATION TIMELINE ---
-for msg in reversed(st.session_state.chat_history):
-    if msg["role"] == "user":
-        st.chat_message("user").write(msg["text"])
+    # Build clear visual scrolling output text terminal
+    chat_html = "<div class='chat-box'>"
+    if st.session_state.live_chat_log:
+        for idx, word in enumerate(st.session_state.live_chat_log):
+            chat_html += f"<p style='margin:4px 0; font-family:monospace;'><span style='color:#bf80ff;'>[Sign {idx+1}]:</span> <strong style='color:#fff; font-size:1.1rem;'>{word}</strong></p>"
     else:
-        st.chat_message("assistant").write(msg["text"])
-        if "latest_audio" in st.session_state and os.path.exists(st.session_state.latest_audio):
-            st.audio(st.session_state.latest_audio, format="audio/mp3")
+        chat_html += "<p style='color:#6a5f80; font-style:italic;'>Waiting for camera translation telemetry input stream...</p>"
+    chat_html += "</div>"
+    
+    st.markdown(chat_html, unsafe_allow_html=True)
+    
+    # Utility clear action
+    st.write("##")
+    if st.button(current_lang["clear"], use_container_width=True):
+        st.session_state.live_chat_log = []
+        st.rerun()
 
-# ================== CORPORATE FOOTER DESK LAYER ==================
+# --- AUTOMATIC UI REFRESH ELEMENT ---
+# This forces Streamlit to look for new camera signs every 1000ms if changes occur
+if len(st.session_state.live_chat_log) > 0:
+    st.write("") 
+
+# ================== CORPORATE FOOTER LAYER ==================
 st.markdown("<hr style='border-color: #3a1f5d;'>", unsafe_allow_html=True)
 st.markdown(
     """
     <div style="text-align: center; font-size: 0.85rem; color:#aaa2bc; letter-spacing: 0.5px;">
-        🚀 <strong>SIGNBRIDGE AI ENGINE</strong> | Developed and Maintained by <strong>GlobalInternet.py</strong><br>
+        🚀 <strong>SIGNBRIDGE REAL-TIME ENGINE</strong> | Developed and Maintained by <strong>GlobalInternet.py</strong><br>
         Architect-in-Chief: <strong>Gesner Deslandes</strong> | Infrastructure Desk Contact: <strong style="color:#bf80ff;">(509)-47385663</strong>
     </div>
     """,
