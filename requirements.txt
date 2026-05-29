@@ -1,4 +1,8 @@
-streamlit>=1.40.0
-streamlit-webrtc>=0.47.5
-mediapipe>=0.10.14
-edge-tts>=6.1.9
+streamlit
+streamlit-webrtc
+mediapipe
+opencv-python-headless
+numpy
+av
+edge-tts
+openai
