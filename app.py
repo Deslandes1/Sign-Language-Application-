@@ -3,16 +3,15 @@ from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
 import cv2
 import mediapipe as mp
 import numpy as np
-import asyncio
-import edge_tts
 import os
 import queue
 import time
 import urllib.request
+from openai import OpenAI  # The xAI API is fully OpenAI-compatible
 
 # ================== CUSTOM BRANDING & VIOLET STYLING ==================
 st.set_page_config(
-    page_title="GlobalInternet.py — SignBridge AI",
+    page_title="GlobalInternet.py — SignBridge AI x Grok",
     page_icon="🌐",
     layout="wide"
 )
@@ -39,13 +38,16 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+# Validate Grok API Key Existence securely
+grok_key = st.secrets.get("XAI_API_KEY", os.environ.get("XAI_API_KEY", ""))
+
 # Shared Thread-Safe Queue to bridge Camera Thread with UI Thread safely
 if "sign_queue" not in st.session_state:
     st.session_state.sign_queue = queue.Queue()
 if "live_chat_log" not in st.session_state:
     st.session_state.live_chat_log = []
 
-# --- CORRECTED CLOUD MODEL DOWNLOAD ROUTE ---
+# --- COMPUTER VISION WEIGHT DOWNLOAD ROUTE ---
 MODEL_PATH = "hand_landmarker.task"
 MODEL_URL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
 
@@ -85,36 +87,15 @@ with st.sidebar:
     <div class="sidebar-info">
         <strong>Coder-in-Chief:</strong><br><span style="color: #fff; font-weight:600;">Gesner Deslandes</span><br><br>
         <strong>Engineering Support Line:</strong><br><span style="color: #bf80ff;">(509)-47385663</span><br><br>
-        <strong>Status:</strong> <span style="color: #aa66ff;">● Protected Core Active</span>
+        <strong>Engine Mode:</strong> <span style="color: #00ffca;">{'Grok AI Mesh Connected' if grok_key else 'Local Rule Engine'}</span>
     </div>
     """, unsafe_allow_html=True)
 
 # ================== LOCALIZATION DICTIONARY ==================
 strings = {
-    "English": {
-        "title": "SignBridge AI Real-Time Stream",
-        "sub": "Live Sign Language Translation Telemetry Desk",
-        "step1": "🎥 Live Video Stream Pipeline",
-        "step2": "💬 Real-Time Live Transcript (Updates automatically)",
-        "clear": "Clear Live Transcript Logs",
-        "hello": "HELLO", "thank_you": "THANK YOU"
-    },
-    "Français": {
-        "title": "Flux en Temps Réel SignBridge AI",
-        "sub": "Bureau de télémétrie de traduction de la langue des signes en direct",
-        "step1": "🎥 Pipeline de flux vidéo en direct",
-        "step2": "💬 Transcription en direct (Mise à jour automatique)",
-        "clear": "Effacer les journaux de transcription",
-        "hello": "BONJOUR", "thank_you": "MERCI"
-    },
-    "Português": {
-        "title": "Fluxo em Tempo Real SignBridge AI",
-        "sub": "Balcão de telemetria de tradução de língua de sinais ao vivo",
-        "step1": "🎥 Pipeline de transmissão de vídeo ao vivo",
-        "step2": "💬 Transcrição em tempo real (Atualização automática)",
-        "clear": "Limpar registros de transcrição",
-        "hello": "OLÁ", "thank_you": "OBRIGADO"
-    }
+    "English": {"title": "SignBridge AI Real-Time Stream", "sub": "Live Grok-Powered Translation Telemetry Desk", "step1": "🎥 Video Stream", "step2": "💬 Live Grok Chat Logs", "clear": "Clear Logs"},
+    "Français": {"title": "Flux en Temps Réel SignBridge AI", "sub": "Bureau de télémétrie Grok AI", "step1": "🎥 Pipeline Vidéo", "step2": "💬 Journaux de transcription", "clear": "Effacer"},
+    "Português": {"title": "Fluxo em Tempo Real SignBridge AI", "sub": "Balcão de telemetria Grok AI", "step1": "🎥 Pipeline de Vídeo", "step2": "💬 Registros de transcrição", "clear": "Limpar"}
 }
 current_lang = strings[language]
 
@@ -129,13 +110,17 @@ VisionRunningMode = mp.tasks.vision.RunningMode
 
 # --- COMPUTER VISION CORE PROCESSING ENGINE ---
 class RealTimeSignTransformer(VideoProcessorBase):
-    # Completely decoupled from st.session_state by passing translation parameters directly on build
-    def __init__(self, result_queue, model_path, hello_str, thanks_str):
+    def __init__(self, result_queue, model_path, api_key, target_language):
         self.result_queue = result_queue
-        self.hello_str = hello_str
-        self.thanks_str = thanks_str
+        self.target_language = target_language
         self.active_ai = False
         
+        # Instantiate Grok API Client if the key configuration is verified
+        if api_key:
+            self.grok_client = OpenAI(api_key=api_key, base_url="https://api.x.ai/v1")
+        else:
+            self.grok_client = None
+
         if model_path and os.path.exists(model_path):
             try:
                 options = HandLandmarkerOptions(
@@ -149,9 +134,9 @@ class RealTimeSignTransformer(VideoProcessorBase):
             except:
                 self.active_ai = False
         
-        self.last_emitted_sign = None
         self.frame_counter = 0
         self.prev_frame_time = 0
+        self.last_api_call_time = 0
 
     def recv(self, frame):
         img = frame.to_ndarray(format="bgr24")
@@ -163,52 +148,48 @@ class RealTimeSignTransformer(VideoProcessorBase):
         self.prev_frame_time = new_frame_time
         
         img = cv2.flip(img, 1) 
-        detected_sign = ""
         telemetry_log = "Telemetry Mode: Thread Safe"
         
-        if not self.active_ai:
-            telemetry_log = "Failsafe Active: Processing tracking metrics"
-            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            avg_brightness = np.mean(gray[:height//2, :])
-            if self.frame_counter % 25 == 0:
-                detected_sign = self.hello_str if avg_brightness > 100 else self.thanks_str
-                self.result_queue.put(detected_sign)
-        else:
+        if self.active_ai:
             rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
             mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_img)
             
             try:
                 detection_result = self.landmarker.detect(mp_image)
                 if detection_result and detection_result.hand_landmarks:
-                    for hand_landmarks in detection_result.hand_landmarks:
-                        wrist = hand_landmarks[0]
-                        pixel_x = int(wrist.x * width)
-                        pixel_y = int(wrist.y * height)
-                        telemetry_log = f"Wrist Tracking -> X: {pixel_x}, Y: {pixel_y}"
-                        
-                        for landmark in hand_landmarks:
-                            x = int(landmark.x * width)
-                            y = int(landmark.y * height)
-                            cv2.circle(img, (x, y), 5, (230, 30, 150), -1) 
-
-                        thumb_tip = hand_landmarks[4].y
-                        index_tip = hand_landmarks[8].y
-                        
-                        if index_tip < thumb_tip:
-                            detected_sign = self.hello_str
-                        else:
-                            detected_sign = self.thanks_str
-
-                    cv2.putText(img, f"Sign: {detected_sign}", (20, 50), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 120, 210), 2)
+                    hand_landmarks = detection_result.hand_landmarks[0]
                     
-                    if detected_sign != self.last_emitted_sign and self.frame_counter % 8 == 0:
-                        self.result_queue.put(detected_sign)
-                        self.last_emitted_sign = detected_sign
-                else:
-                    self.last_emitted_sign = None
+                    # Trace visual nodes
+                    for landmark in hand_landmarks:
+                        x = int(landmark.x * width)
+                        y = int(landmark.y * height)
+                        cv2.circle(img, (x, y), 5, (230, 30, 150), -1) 
+
+                    # RATE LIMIT PROTECTION: Only call Grok once every 1.5 seconds if hands move significantly
+                    current_time = time.time()
+                    if current_time - self.last_api_call_time > 1.5 and self.grok_client:
+                        self.last_api_call_time = current_time
+                        
+                        # Pack all 21 hand coordinate structures into a small JSON string payload
+                        coords_summary = [{"id": i, "x": round(lm.x, 3), "y": round(lm.y, 3), "z": round(lm.z, 3)} for i, lm in enumerate(hand_landmarks)]
+                        
+                        # Query Grok to evaluate the telemetry packet
+                        response = self.grok_client.chat.completions.create(
+                            model="grok-4.3",
+                            messages=[
+                                {"role": "system", "content": f"You are an expert Sign Language translation model. Analyze the 21 hand landmark coordinates provided. Translate them into a single word or short phrase in {self.target_language}. Respond ONLY with the translated phrase, nothing else."},
+                                {"role": "user", "content": f"Landmarks: {str(coords_summary)}"}
+                            ],
+                            max_tokens=10,
+                            temperature=0.1
+                        )
+                        grok_result = response.choices[0].message.content.strip()
+                        if grok_result:
+                            self.result_queue.put(grok_result)
+                            
+                    telemetry_log = f"Grok Node Streaming Matrix: {width}x{height}"
             except Exception as e:
-                telemetry_log = f"Tracking Error: {str(e)}"
+                telemetry_log = f"Grok API Error: {str(e)}"
 
         cv2.putText(img, f"FPS: {int(fps)} | Matrix: {width}x{height}", (20, height - 40), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
@@ -224,21 +205,17 @@ col_video, col_chat = st.columns([1, 1])
 with col_video:
     st.write(f"<h3 style='color: #bf80ff;'>{current_lang['step1']}</h3>", unsafe_allow_html=True)
     
-    # We pass explicit static string properties here instead of letting the thread read state directly
     webrtc_streamer(
-        key="realtime-bridge-v7", 
+        key="realtime-bridge-v8", 
         video_processor_factory=lambda: RealTimeSignTransformer(
             st.session_state.sign_queue, 
             local_model_file,
-            current_lang["hello"],
-            current_lang["thank_you"]
+            grok_key,
+            language
         ),
         rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
         media_stream_constraints={"video": {"facingMode": camera_facing}, "audio": False}
     )
-    
-    if model_error_flag:
-        st.warning("Notice: System is running on the backup engine due to external network constraints.")
 
 # --- REAL-TIME LIVE TRANSCRIPT DESK PANEL ---
 with col_chat:
@@ -254,16 +231,13 @@ with col_chat:
     chat_html = "<div class='chat-box'>"
     if st.session_state.live_chat_log:
         for idx, word in enumerate(st.session_state.live_chat_log):
-            chat_html += f"<p style='margin:6px 0; font-family:monospace;'><span style='color:#bf80ff;'>[Sign #{idx+1}]:</span> <strong style='color:#fff; font-size:1.1rem;'>{word}</strong></p>"
+            chat_html += f"<p style='margin:6px 0; font-family:monospace;'><span style='color:#00ffca;'>[Grok #{idx+1}]:</span> <strong style='color:#fff; font-size:1.1rem;'>{word}</strong></p>"
     else:
-        chat_html += "<p style='color:#6a5f80; font-style:italic;'>Waiting for camera translation telemetry input stream...</p>"
+        chat_html += "<p style='color:#6a5f80; font-style:italic;'>Waiting for Grok AI mesh telemetry stream...</p>"
     chat_html += "</div>"
     
     st.markdown(chat_html, unsafe_allow_html=True)
     
-    if st.session_state.live_chat_log:
-        st.write("") 
-        
     st.write("##")
     if st.button(current_lang["clear"], use_container_width=True):
         st.session_state.live_chat_log = []
