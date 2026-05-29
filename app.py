@@ -173,9 +173,9 @@ class RealTimeSignTransformer(VideoProcessorBase):
                         # Pack all 21 hand coordinate structures into a small JSON string payload
                         coords_summary = [{"id": i, "x": round(lm.x, 3), "y": round(lm.y, 3), "z": round(lm.z, 3)} for i, lm in enumerate(hand_landmarks)]
                         
-                        # Query Grok to evaluate the telemetry packet
+                        # Query Grok to evaluate the telemetry packet with stable fallback model
                         response = self.grok_client.chat.completions.create(
-                            model="grok-4.3",
+                            model="grok-2-1212",
                             messages=[
                                 {"role": "system", "content": f"You are an expert Sign Language translation model. Analyze the 21 hand landmark coordinates provided. Translate them into a single word or short phrase in {self.target_language}. Respond ONLY with the translated phrase, nothing else."},
                                 {"role": "user", "content": f"Landmarks: {str(coords_summary)}"}
