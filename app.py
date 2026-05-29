@@ -8,18 +8,11 @@ import edge_tts
 import os
 
 # ================== MODERN MEDIAPIAPE INITIALIZATION ==================
-# Using the updated non-deprecated vision tracking API
+# Using the updated non-deprecated vision tracking API (mp.tasks)
 BaseOptions = mp.tasks.BaseOptions
 HandLandmarker = mp.tasks.vision.HandLandmarker
 HandLandmarkerOptions = mp.tasks.vision.HandLandmarkerOptions
 VisionRunningMode = mp.tasks.vision.RunningMode
-
-# Create drawing utilities for video overlay
-mp_draw = mp.solutions.drawing_utils
-mp_hands_connections = mp.solutions.hands_connections
-
-st.title("🌐 SignBridge AI Chatbot — GlobalInternet.py")
-st.subheader("Real-Time Sign Language Translation & Audio Sync")
 
 # Initialize persistent session states for the chatbot conversation
 if "chat_history" not in st.session_state:
@@ -49,10 +42,11 @@ class SignLanguageTransformer(VideoTransformerBase):
         self.landmarker = HandLandmarker.create_from_options(options)
 
     def transform(self, frame):
+        # Convert frame to numpy array and flip for natural mirror orientation
         img = frame.to_ndarray(format="bgr24")
-        img = cv2.flip(img, 1) # Natural mirror orientation
+        img = cv2.flip(img, 1)
         
-        # Convert frame format for processing
+        # Convert frame format for modern processing
         rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_img)
         
@@ -62,14 +56,14 @@ class SignLanguageTransformer(VideoTransformerBase):
         detected_sign = ""
         if detection_result.hand_landmarks:
             for hand_landmarks in detection_result.hand_landmarks:
-                # Map tracked skeleton onto video stream frame
-                # Converting dict-style structural items to MediaPipe display structure
+                # Manual drawing of landmark points (replacing obsolete drawing_utils)
                 for landmark in hand_landmarks:
                     x = int(landmark.x * img.shape[1])
                     y = int(landmark.y * img.shape[0])
-                    cv2.circle(img, (x, y), 5, (0, 255, 0), -1)
-                
+                    cv2.circle(img, (x, y), 5, (0, 255, 0), -1) # Green dots
+
                 # --- SIGN TRANSLATION MATRIX LOGIC ---
+                # Threshold heuristic using y-coordinates
                 thumb_tip = hand_landmarks[4].y
                 index_tip = hand_landmarks[8].y
                 if index_tip < thumb_tip:
@@ -108,6 +102,7 @@ with col2:
 if send_btn and user_input:
     st.session_state.chat_history.append({"role": "user", "text": user_input})
     
+    # Generate bot response and audio simultaneously
     bot_reply = f"System processed sign: '{user_input}'. How can I assist you further?"
     st.session_state.chat_history.append({"role": "bot", "text": bot_reply})
     
